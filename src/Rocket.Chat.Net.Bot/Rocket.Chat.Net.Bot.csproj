@@ -9,9 +9,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Reference Include="RocketChatNet">
-      <HintPath>..\RocketChatNet\bin\Debug\netcoreapp3.1\RocketChatNet.dll</HintPath>
-    </Reference>
+    <ProjectReference Include="..\Rocket.Chat.Net\Rocket.Chat.Net.csproj" />
   </ItemGroup>
 
 </Project>
