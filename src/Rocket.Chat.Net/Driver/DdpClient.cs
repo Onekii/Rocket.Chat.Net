@@ -4,6 +4,8 @@
     using System.Collections.Concurrent;
     using System.Collections.Generic;
     using System.Linq;
+    using System.Net.WebSockets;
+    using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
 
@@ -12,13 +14,14 @@
 
     using Rocket.Chat.Net.Interfaces;
     using Rocket.Chat.Net.Models;
-    using Rocket.Chat.Net.Portability.Websockets;
 
     public class DdpClient : IDdpClient
     {
         private readonly ILogger _logger;
-        private readonly IWebSocketWrapper _socket;
+        private readonly ClientWebSocket _socket;
         private readonly ConcurrentDictionary<string, JObject> _messages = new ConcurrentDictionary<string, JObject>();
+
+        Thread _waitForMessageThread;
 
         public string Url { get; }
         public string SessionId { get; private set; }
@@ -34,38 +37,33 @@
             var protocol = useSsl ? "wss" : "ws";
             Url = $"{protocol}://{baseUrl}/websocket";
 
-            _socket = new WebSocketWrapper(new PortableWebSocket(Url));
-            AttachEvents();
+            _socket = new ClientWebSocket();
+            _waitForMessageThread = new Thread(WaitForMessage);
+            _waitForMessageThread.Start();
         }
 
-        public DdpClient(IWebSocketWrapper socket, ILogger logger)
+        public DdpClient(ClientWebSocket socket, ILogger logger)
         {
             _logger = logger;
 
             _socket = socket;
-            AttachEvents();
         }
 
-        private void AttachEvents()
+        private async void WaitForMessage()
         {
-            _socket.MessageReceived += SocketOnMessage;
-            _socket.Closed += SocketOnClosed;
-            _socket.Error += SocketOnError;
-            _socket.Opened += SocketOnOpened;
-        }
+            var recvBytes = new byte[4096];
+            var recvBuffer = new ArraySegment<byte>(recvBytes);
 
-        private void SocketOnClosed(object sender, EventArgs eventArgs)
-        {
-            _logger.Debug("CLOSE");
-            if (SessionId != null && !IsDisposed)
+            while (true)
             {
-                ConnectAsync(CancellationToken.None).Wait();
-            }
-        }
+                if (_socket.State != WebSocketState.Open)
+                    continue;
 
-        private void SocketOnError(object sender, PortableErrorEventArgs errorEventArgs)
-        {
-            _logger.Info("ERROR: " + errorEventArgs?.Exception?.Message);
+                WebSocketReceiveResult recvResult = await _socket.ReceiveAsync(recvBytes, new CancellationToken());
+                byte[] msgBytes = recvBuffer.Skip(recvBuffer.Offset).Take(recvResult.Count).ToArray();
+                string recvMessage = Encoding.UTF8.GetString(msgBytes);
+                SocketOnMessage(recvMessage);
+            }
         }
 
         private void SocketOnOpened(object sender, EventArgs eventArgs)
@@ -88,9 +86,9 @@
             SendObjectAsync(request, CancellationToken.None).Wait();
         }
 
-        private void SocketOnMessage(object sender, PortableMessageReceivedEventArgs messageEventArgs)
+        private void SocketOnMessage(string message)
         {
-            var json = messageEventArgs.Message;
+            var json = message;
             var data = JObject.Parse(json);
             _logger.Debug($"RECIEVED: {JsonConvert.SerializeObject(data, Formatting.Indented)}");
 
@@ -164,7 +162,9 @@
 
         public async Task ConnectAsync(CancellationToken token)
         {
-            _socket.Open();
+            await _socket.ConnectAsync(new Uri(Url), token);
+            SocketOnOpened(this, null);
+
             await WaitForConnectAsync(token).ConfigureAwait(false);
         }
 
@@ -237,17 +237,16 @@
         {
             IsDisposed = true;
             SessionId = null;
-            _socket.Close();
+            _socket.CloseAsync(WebSocketCloseStatus.Empty, "", new CancellationToken());
         }
 
         private async Task SendObjectAsync(object payload, CancellationToken token)
         {
-            await Task.Run(() =>
-            {
-                var json = JsonConvert.SerializeObject(payload, Formatting.Indented);
-                _logger.Debug($"SEND: {json}");
-                _socket.Send(json);
-            }, token).ConfigureAwait(false);
+            var json = JsonConvert.SerializeObject(payload, Formatting.Indented);
+            _logger.Debug($"SEND: {json}");
+            byte[] sendbytes = Encoding.UTF8.GetBytes(json);
+            var sendbuffer = new ArraySegment<byte>(sendbytes);
+            await _socket.SendAsync(sendbuffer, WebSocketMessageType.Text, true, token).ConfigureAwait(false);
         }
 
         private async Task<JObject> WaitForIdOrReadyAsync(string id, CancellationToken token)

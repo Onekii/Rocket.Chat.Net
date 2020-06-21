@@ -1,13 +1,16 @@
 ﻿namespace Rocket.Chat.Net.Models
 {
     using System;
-
+    using System.Dynamic;
     using Newtonsoft.Json;
 
     using Rocket.Chat.Net.JsonConverters;
 
     public class Room
     {
+        [JsonProperty("_id")]
+        public string ID { get; set; }
+        
         [JsonProperty("open")]
         public bool IsOpen { get; set; }
 

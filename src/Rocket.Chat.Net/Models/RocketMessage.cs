@@ -40,7 +40,7 @@
         /// Room the message was recieved in.
         /// </summary>
         [JsonIgnore, CanBeNull]
-        public RoomWithInfo Room { get; set; }
+        public Room Room { get; set; }
 
         /// <summary>
         /// The text contained in this message.
@@ -131,7 +131,7 @@
         /// <summary>
         /// A list of users that this message mentions.
         /// </summary>
-        [JsonProperty(PropertyName = "mentions"), NotNull]
+        [JsonProperty(PropertyName = "mentions"), JetBrains.Annotations.NotNull]
         public List<User> Mentions { get; set; }
 
         /// <summary>
@@ -144,13 +144,13 @@
         /// List of user Id's that this message was starred by.
         /// WARNING: This may break in the future.
         /// </summary>
-        [JsonProperty(PropertyName = "starred"), NotNull]
+        [JsonProperty(PropertyName = "starred"), JetBrains.Annotations.NotNull]
         public List<User> Starred { get; set; }
 
         /// <summary>
         /// List of attachments for this message.
         /// </summary>
-        [JsonProperty(PropertyName = "attachments"), NotNull]
+        [JsonProperty(PropertyName = "attachments"), JetBrains.Annotations.NotNull]
         public List<Attachment> Attachments { get; set; }
 
         /// <summary>

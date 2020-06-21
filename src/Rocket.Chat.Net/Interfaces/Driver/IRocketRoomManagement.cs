@@ -104,6 +104,6 @@
         /// Get the list of known rooms.
         /// SubscribeToRoomListAsync() should be called once before using this property.
         /// </summary>
-        RoomCollection Rooms { get; }
+        //RoomCollection Rooms { get; }
     }
 }

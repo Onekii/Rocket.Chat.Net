@@ -4,6 +4,10 @@
     using System.Collections.Generic;
     using System.IO;
     using System.Linq;
+    using System.Linq.Expressions;
+    using System.Net.Sockets;
+    using System.Net.WebSockets;
+    using System.Security.Cryptography;
     using System.Threading;
     using System.Threading.Tasks;
 
@@ -24,7 +28,7 @@
 
     public class RocketChatDriver : IRocketChatDriver
     {
-        private const string MessageTopic = "stream-messages";
+        private const string MessageTopic = "stream-room-messages";
         private const int MessageSubscriptionLimit = 10;
 
         private readonly IStreamCollectionDatabase _collectionDatabase;
@@ -41,7 +45,8 @@
 
         public bool IsBot { get; set; }
 
-        public RoomCollection Rooms => new RoomCollection(GetRoomsCollection(), GetRoomInfoCollection());
+        //public RoomCollection Rooms => new RoomCollection(GetRoomsCollection(), GetRoomInfoCollection());
+        public Room[] Rooms;
 
         public JsonSerializerSettings JsonSerializerSettings { get; private set; }
         public JsonSerializer JsonSerializer => JsonSerializer.Create(JsonSerializerSettings);
@@ -118,20 +123,20 @@
         private void HandleRocketMessage(string type, JObject data)
         {
             var o = data.ToObject<SubscriptionResult<JObject>>(JsonSerializer);
-            var isMessage = type == "added" && o.Collection == MessageTopic && o.Fields["args"] != null;
+            var isMessage = type == "changed" && o.Collection == MessageTopic && o.Fields["args"] != null;
             if (!isMessage)
             {
                 return;
             }
 
-            var messageRaw = o.Fields["args"][1];
+            var messageRaw = o.Fields["args"][0];
             var message = messageRaw.ToObject<RocketMessage>(JsonSerializer);
             message.IsBotMentioned = message.Mentions.Any(x => x.Id == UserId);
             message.IsFromMyself = message.CreatedBy.Id == UserId;
 
             var rooms = Rooms;
 
-            message.Room = rooms.FirstOrDefault(x => x.Id == message.RoomId);
+            message.Room = rooms.FirstOrDefault(x => x.ID == message.RoomId);
 
             var edit = message.WasEdited ? "(EDIT)" : "";
             var mentioned = message.IsBotMentioned ? "(Mentioned)" : "";
@@ -154,28 +159,23 @@
 
             return results.ToObject<MethodResult<CreateRoomResult>>(JsonSerializer);
         }
+        public async Task<MethodResult<Room[]>> RequestLatestRooms()
+        {
+            var result = await _client.CallAsync("rooms/get", TimeoutToken, 0);
+
+            return result.ToObject<MethodResult<Room[]>>(JsonSerializer);
+        }
 
         public async Task SubscribeToRoomListAsync()
         {
-            await _client.SubscribeAndWaitAsync("subscription", TimeoutToken).ConfigureAwait(false);
-            var roomCollection = GetRoomsCollection();
-            if (roomCollection == null)
+            var result = await RequestLatestRooms().ConfigureAwait(false);
+            if (result.HasError)
             {
-                _logger.Error("RoomCollection should not be null.");
-                return;
+                throw new Exception($"Login failed: {result.Error.Message}.");
             }
-            roomCollection.Modified += async (sender, args) =>
-            {
-                if (args.ModificationType == ModificationType.Added)
-                {
-                    var room = args.Result;
-                    await SubscribeToRoomInformationAsync(room.Name, room.Type).ConfigureAwait(false);
-                }
-            };
-            foreach (var room in roomCollection.Items().ToList().Select(x => x.Value))
-            {
-                await SubscribeToRoomInformationAsync(room.Name, room.Type).ConfigureAwait(false);
-            }
+
+            Rooms = result.Result;
+            return;
         }
 
         public async Task SubscribeToRoomAsync(string roomId = null)
